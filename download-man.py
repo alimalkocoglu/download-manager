@@ -8,8 +8,7 @@ import subprocess
 import json
 
 # Starting assumptions
-# current directory will include a source file with all desired download links. This file will be manually created. File name must be links-main-XXXXX
-# curent directory will include one and only file named download_information.json (This file can be created manually or with the parallel_download.py script)
+# curent directory will include one and only file named download_information.json
 
 def download_with_parallel(file_with_links):
     """ expects a file with download link(s) and uses GNU paralel to start downloads."""
@@ -43,7 +42,7 @@ def is_download_active(directory='.'):
     return False
 
 
-def is_download_complete(file_path : str) -> Tuple[bool,str]:
+def is_file_download_complete(file_path : str) -> Tuple[bool,str]:
 
     ''' Searches the given log file for the pattern "saved [n bytes / n bytes]"
         returns a tuple with the boolean value of download completion status and name of the file.
@@ -71,9 +70,43 @@ def is_download_complete(file_path : str) -> Tuple[bool,str]:
     except FileNotFoundError:
         print("The specified file was not found.")
         return [False,file_name]
+
+
+def process_recursive_logs(logfile,link_file,base_link=None):
+
+    # Regex pattern to match lines starting with "Downloaded"
+    pattern = re.compile(r'^Downloaded:\s\d+\sfiles,.*$',re.MULTILINE)
+    
+    # Read the contents of the links file
+    with open(link_file, 'r') as lf:
+        links = lf.readlines()
+        #updated_links = links.copy()
+
+    with open(logfile, 'r') as lf:
+        log_content = lf.read()
+                
+        # Search for the pattern in the log file
+        match = pattern.search(log_content)
+        if match:
+            link_to_remove = os.path.basename(logfile)
+            link_to_remove = os.path.splitext(link_to_remove)[0]
+            regex_pattern = re.compile(f"{base_link}{link_to_remove}/$")  # Match link_to_remove at the end of the string
+
+            # Remove the link with the exact match from the links file content
+            updated_links = [link for link in links if not regex_pattern.search(link)] 
+
+            # Write the updated content back to the links file 
+            with open(link_file, 'w') as lf:
+                lf.writelines(updated_links) #link is removed from the download file.
+                print(updated_links)
+                decrease_remaining_links_by1()
+        else:
+            return
     
 
-def decrease_remaining_links_by1(file_path, key='number_of_remaining_links'):
+
+
+def decrease_remaining_links_by1(file_path='download_information.json', key='number_of_remaining_links'):
     """ looks at the download_information.json file and adjusts the key:value pair"""
 
     # Check if the JSON file exists
@@ -96,7 +129,62 @@ def decrease_remaining_links_by1(file_path, key='number_of_remaining_links'):
     with open(file_path, 'w') as file:
         json.dump(data, file, indent=4)
 
-def increase_auto_starts_by1(file_path, key='number_of_auto_starts'):
+
+def get_download_links(file_path='./download_information.json', key='download_links'):  #HARDCODED TARGET VARIABLE NAME
+    """ Assumes that download_information.json file exists and returns the download link file path"""
+
+    # Check if the JSON file exists
+    if not os.path.exists(file_path):
+        print(f"Error: The file '{file_path}' does not exist.")
+        return
+
+    # Load existing download_information_file
+    with open(file_path, 'r') as file:
+        data = json.load(file)
+
+    if key in data:
+        return data[key]
+    else:
+        print(f"Key '{key}' not found in the JSON file.")
+        return
+
+def get_url(file_path='./download_information.json', key='Recursive_url'):  #HARDCODED TARGET VARIABLE NAME
+    """ Assumes that download_information.json file exists and returns the download link file path"""
+
+    # Check if the JSON file exists
+    if not os.path.exists(file_path):
+        print(f"Error: The file '{file_path}' does not exist.")
+        return
+
+    # Load existing download_information_file
+    with open(file_path, 'r') as file:
+        data = json.load(file)
+
+    if key in data:
+        return data[key]
+    else:
+        print(f"Key '{key}' not found in the JSON file.")
+        return
+
+def is_recursive(file_path='./download_information.json', key='Recursive_file_structure'):  #HARDCODED TARGET VARIABLE NAME
+    """ Assumes that download_information.json file exists and returns the download link file path"""
+
+    # Check if the JSON file exists
+    if not os.path.exists(file_path):
+        print(f"Error: The file '{file_path}' does not exist.")
+        return
+
+    # Load existing download_information_file
+    with open(file_path, 'r') as file:
+        data = json.load(file)
+
+    if key in data:
+        return data[key]
+    else:
+        print(f"Key '{key}' not found in the JSON file.")
+        return
+
+def increase_auto_starts_by1(file_path="download_information.json", key='number_of_auto_starts'):
     """ looks at the download_information.json file and adjusts the key:value pair"""
 
     # Check if the JSON file exists
@@ -167,15 +255,9 @@ def move_to_complete_downloads(file_path):
     return
 
 
-def remove_link_with_filename(filename : str, links_file_path = 'links-main'):
+def remove_link_with_filename(filename : str, links_file_path):
 
-    """ASSUMES that the input file for the links will start with links-main-XXXX"""
-
-    #this can be outside so doesn't run everytime. Download link file will the the same. Will updates break it?
-
-    links_file_pattern = f"{links_file_path}*"
-    links_file_path_search = glob.glob(os.path.join(os.curdir,links_file_pattern))
-    links_file_path = links_file_path_search[0]
+    """ removes the completed link from the links source file."""
 
     if not links_file_path: 
         print(f"No main link file found matching pattern: {links_file_path}") 
@@ -191,7 +273,7 @@ def remove_link_with_filename(filename : str, links_file_path = 'links-main'):
 
         with open(links_file_path, 'w') as file:
             file.write(updated_log_contents)
-            decrease_remaining_links_by1("download_information.json")
+            decrease_remaining_links_by1()
 
     except FileNotFoundError:
         print(f"The file {links_file_path} does not exist.")
@@ -207,13 +289,14 @@ def adjust_downloaded(log_file_path,file_name):
     """Adjusts the download information file, log files and the actual file after a download is completed."""
 
     remove_log_file(log_file_path)
-    remove_link_with_filename(file_name)
+    remove_link_with_filename(file_name,get_download_links())
     move_to_complete_downloads(file_name)
 
     return None 
 
 current_directory = os.getcwd()
 active_download = is_download_active()
+
 
 for file_name in os.listdir(current_directory):
     
@@ -223,61 +306,19 @@ for file_name in os.listdir(current_directory):
         break
 
     if file_name.endswith('.log'): 
-        file_path = os.path.join(current_directory, file_name)
-        print(file_path,"from while") 
-        result =  is_download_complete(file_path)
-        if result[0] == True: #if download is successfull
-            adjust_downloaded(file_path,result[1])
+        file_path = os.path.join(current_directory, file_name) #logfile
+        if is_recursive():
+            process_recursive_logs(file_path,get_download_links(),get_url())
+        else:
+            result =  is_file_download_complete(file_path)
+            if result[0] == True: #if download is successfull
+                adjust_downloaded(file_path,result[1],)
             
 # after adjusments are done, this line below will decide if download needs to be restarted.
-if get_remaining_download_links() > 0 and not active_download:
-    print("should not see this")
-
-    links_file_pattern = "links-main-*"
-    links_file_path_search = glob.glob(os.path.join(os.curdir,links_file_pattern))
-    links_file_path = links_file_path_search[0]
-    increase_auto_starts_by1("download_information.json") #if this line was after the download_function_call ? 
+if get_remaining_download_links() > 0 and not active_download: 
+    links_file_pattern = get_download_links()
+    increase_auto_starts_by1() #if this line was after the download_function_call ? 
     print('download auto restarted')
-    download_with_parallel(links_file_path)
+    download_with_parallel(links_file_pattern)
 elif get_remaining_download_links() == 0 and not active_download:
     print("Download is complete")
-
-
-
-# later concerns below for just note taking purposes. Won't effect the script.
-
-def find_phrase_in_log(file_path, phrase):
-    try:
-        with open(file_path, 'r') as file:
-            log_contents = file.read()
-            if re.search(phrase, log_contents):
-                return True
-            else:
-                return False
-    except FileNotFoundError:
-        print("The specified file was not found.")
-        return False
-    
-
-def search_log(file_name : str): 
-    # Construct the log file pattern
-    log_file_pattern = f"*{file_name}.log" 
-    log_file_paths = glob.glob(os.path.join(os.curdir, log_file_pattern))
-    if not log_file_paths: 
-        print(f"No log files found matching pattern: {log_file_pattern}") 
-        return None 
-    # Assuming there's only one log file matching the pattern 
-    log_file_path = log_file_paths[0]
-    print(log_file_paths[0],"from search log")
-    return log_file_path
-
-
-#download did not start
-# if the log file doesn't have saved to ... there is a problem
-# Make sure about other error messages saving to (Maybe out of disk space etc.)
-# wget tried and gave up
-# look for the string 
-#grab the file name
-#difference between one link vs multiple links 
-
-
